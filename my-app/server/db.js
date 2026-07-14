@@ -1,17 +1,27 @@
 import mongoose from 'mongoose'
 
+// Cached across invocations so serverless functions (which may reuse a warm
+// container) don't reconnect to MongoDB on every request.
+let connectionPromise = null
+
 export async function connectDB() {
   const uri = process.env.MONGODB_URI
   if (!uri) {
     console.warn('[db] MONGODB_URI not set — history/stats will not persist')
     return
   }
-  try {
-    await mongoose.connect(uri, { serverSelectionTimeoutMS: 5000 })
-    console.log('[db] Connected to MongoDB')
-  } catch (err) {
-    console.error(`[db] Connection failed: ${err.message} — history/stats will not persist`)
-  }
+  if (mongoose.connection.readyState === 1) return
+  if (connectionPromise) return connectionPromise
+
+  connectionPromise = mongoose
+    .connect(uri, { serverSelectionTimeoutMS: 5000 })
+    .then(() => console.log('[db] Connected to MongoDB'))
+    .catch((err) => {
+      console.error(`[db] Connection failed: ${err.message} — history/stats will not persist`)
+      connectionPromise = null
+    })
+
+  return connectionPromise
 }
 
 export function isDBConnected() {
