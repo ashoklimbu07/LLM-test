@@ -1,90 +1,9 @@
 import { useEffect, useState } from 'react'
-
-// rpd = requests/day, rpm = requests/minute on that provider's free tier.
-// Google does not publish a fixed public RPD table (their docs point to a
-// login-only per-account dashboard); users commonly report much lower real-world
-// limits than older published figures, so gemini's rpd here reflects that
-// observed range rather than a doc-confirmed number. Groq's numbers are from
-// its official rate-limits table (console.groq.com/docs/rate-limits, checked
-// Jul 2026). OpenRouter's are from its official docs. All of these can change
-// any time at the provider's discretion.
-const MODEL_GROUPS = [
-  {
-    provider: 'gemini',
-    label: 'Google Gemini (free tier, limits vary by account)',
-    models: [
-      { id: 'gemini-3.1-flash-lite', rpd: 500, rpm: 15 },
-      { id: 'gemini-3-flash-preview', rpd: 20, rpm: 5 },
-      { id: 'gemini-3.5-flash', rpd: 20, rpm: 5 },
-    ],
-  },
-  {
-    provider: 'groq',
-    label: 'Groq (free, fast open models)',
-    models: [
-      { id: 'llama-3.3-70b-versatile', rpd: 1000, rpm: 30 },
-      { id: 'openai/gpt-oss-120b', rpd: 1000, rpm: 30 },
-      { id: 'qwen/qwen3-32b', rpd: 1000, rpm: 60 },
-    ],
-  },
-  {
-    provider: 'openrouter',
-    // OpenRouter free (":free") models: 20 requests/minute always. Daily cap starts at
-    // 50/day on a new account and rises to 1000/day permanently after a one-time $10
-    // lifetime credit purchase (no need to spend it, just buy it once).
-    label: 'OpenRouter (free-tagged models)',
-    // Verified live against OpenRouter's /models endpoint and a real chat completion
-    // call on 2026-07-14 — their ":free" catalog changes without notice, so re-check
-    // periodically (models here have previously 404'd after being pulled from free tier).
-    models: [
-      { id: 'meta-llama/llama-3.3-70b-instruct:free', rpd: 50, rpm: 20 },
-      { id: 'nvidia/nemotron-3-ultra-550b-a55b:free', rpd: 50, rpm: 20 },
-      { id: 'openai/gpt-oss-20b:free', rpd: 50, rpm: 20 },
-      { id: 'qwen/qwen3-next-80b-a3b-instruct:free', rpd: 50, rpm: 20 },
-      // Chinese model, 295B MoE, strong reasoning/agentic benchmarks. This one is a
-      // time-limited promo (free through 2026-07-21), unlike the others above which
-      // have no announced end date — it may switch to paid after that.
-      { id: 'tencent/hy3:free', rpd: 50, rpm: 20, note: 'free until Jul 21, 2026' },
-    ],
-  },
-]
-
-const ALL_MODELS = MODEL_GROUPS.flatMap((g) =>
-  g.models.map((m) => ({ provider: g.provider, model: m.id, label: g.label }))
-)
-
-const PROVIDER_KEY_INFO = {
-  gemini: {
-    name: 'Gemini',
-    getKeyUrl: 'https://aistudio.google.com/apikey',
-    steps: [
-      'Go to aistudio.google.com/apikey',
-      'Sign in with your Google account',
-      'Click "Create API key"',
-      'Copy the key and paste it below',
-    ],
-  },
-  groq: {
-    name: 'Groq',
-    getKeyUrl: 'https://console.groq.com/keys',
-    steps: [
-      'Go to console.groq.com/keys',
-      'Sign up or log in',
-      'Click "Create API Key"',
-      'Copy the key and paste it below',
-    ],
-  },
-  openrouter: {
-    name: 'OpenRouter',
-    getKeyUrl: 'https://openrouter.ai/keys',
-    steps: [
-      'Go to openrouter.ai/keys',
-      'Sign up or log in',
-      'Click "Create Key"',
-      'Copy the key and paste it below',
-    ],
-  },
-}
+import { MODEL_GROUPS, ALL_MODELS, PROVIDER_KEY_INFO } from './models'
+import ResultView from './ResultView'
+import HistoryView from './HistoryView'
+import CompareView from './CompareView'
+import SystemPromptEditor from './SystemPromptEditor'
 
 function KeyModal({ open, onClose, keys, setKeys, savedNotice }) {
   if (!open) return null
@@ -148,28 +67,12 @@ function KeyModal({ open, onClose, keys, setKeys, savedNotice }) {
   )
 }
 
-function App() {
+function TestView({ keys, setKeyModalOpen, systemPrompt, defaultSystemPrompt, setSystemPrompt }) {
   const [prompt, setPrompt] = useState('')
   const [selected, setSelected] = useState(`${ALL_MODELS[0].provider}::${ALL_MODELS[0].model}`)
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
-  const [keyModalOpen, setKeyModalOpen] = useState(false)
-  const [keys, setKeys] = useState({})
-  const [savedNotice, setSavedNotice] = useState('')
-
-  useEffect(() => {
-    const stored = localStorage.getItem('llm-playground-keys')
-    if (stored) setKeys(JSON.parse(stored))
-  }, [])
-
-  const closeKeyModal = () => {
-    localStorage.setItem('llm-playground-keys', JSON.stringify(keys))
-    setKeyModalOpen(false)
-    setSavedNotice('Keys saved')
-    console.log('[llm-playground] API keys saved to local storage:', Object.keys(keys).filter((p) => keys[p]))
-    setTimeout(() => setSavedNotice(''), 2000)
-  }
 
   const [provider, model] = selected.split('::')
   const missingKey = !keys[provider]
@@ -194,7 +97,7 @@ function App() {
       const res = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider, model, prompt, apiKey: keys[provider] || undefined }),
+        body: JSON.stringify({ provider, model, prompt, apiKey: keys[provider] || undefined, systemPrompt }),
       })
       const data = await res.json()
       const elapsedMs = Math.round(performance.now() - startedAt)
@@ -210,122 +113,197 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-900 flex flex-col items-center py-10 px-4">
-      <div className="w-full max-w-2xl">
-        <div className="flex items-start justify-between mb-1">
-          <h1 className="text-3xl font-bold">Free LLM Playground</h1>
+    <div className="w-full max-w-2xl">
+      <SystemPromptEditor
+        value={systemPrompt}
+        onChange={setSystemPrompt}
+        defaultValue={defaultSystemPrompt}
+      />
+
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 mb-6">
+        <label className="block text-sm font-medium text-gray-700 mb-2">Prompt</label>
+        <textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          rows={5}
+          placeholder="Type your prompt here..."
+          className="w-full resize-none rounded-lg border border-gray-300 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+        />
+
+        <div className="flex flex-col sm:flex-row gap-3 mt-4">
+          <select
+            value={selected}
+            onChange={(e) => setSelected(e.target.value)}
+            className="flex-1 rounded-lg border border-gray-300 p-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+          >
+            {MODEL_GROUPS.map((group) => (
+              <optgroup key={group.label} label={group.label}>
+                {group.models.map((m) => (
+                  <option key={m.id} value={`${group.provider}::${m.id}`}>
+                    {m.id} (~{m.rpd}/day, {m.rpm}/min{m.note ? `, ${m.note}` : ''})
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+
           <button
             type="button"
-            onClick={() => setKeyModalOpen(true)}
-            className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 hover:bg-gray-100"
+            onClick={handleTest}
+            disabled={loading || !prompt.trim()}
+            className="px-5 py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
           >
-            🔑 My API keys
+            {loading ? 'Testing...' : 'Test'}
           </button>
         </div>
-        <p className="text-gray-500 mb-6">Test a prompt against free-tier models, using your own key</p>
 
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 mb-6">
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Prompt
-          </label>
-          <textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            rows={5}
-            placeholder="Type your prompt here..."
-            className="w-full resize-none rounded-lg border border-gray-300 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-          />
+        <p className="text-xs text-gray-400 mt-2">
+          The numbers in parentheses are that model's free-tier limits: how many requests you
+          can send per day, and per minute, before the provider starts rejecting calls until the
+          next window. Both reset automatically (daily count at midnight, per-minute count every
+          60s) and are set by each provider, not by this app — treat them as approximate, since
+          providers change them without notice.
+        </p>
 
-          <div className="flex flex-col sm:flex-row gap-3 mt-4">
-            <select
-              value={selected}
-              onChange={(e) => setSelected(e.target.value)}
-              className="flex-1 rounded-lg border border-gray-300 p-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-            >
-              {MODEL_GROUPS.map((group) => (
-                <optgroup key={group.label} label={group.label}>
-                  {group.models.map((m) => (
-                    <option key={m.id} value={`${group.provider}::${m.id}`}>
-                      {m.id} (~{m.rpd}/day, {m.rpm}/min{m.note ? `, ${m.note}` : ''})
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
-
+        {missingKey && (
+          <p className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-3">
+            ⚠ You're missing an API key for {PROVIDER_KEY_INFO[provider].name}. Click{' '}
             <button
               type="button"
-              onClick={handleTest}
-              disabled={loading || !prompt.trim()}
-              className="px-5 py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+              onClick={() => setKeyModalOpen(true)}
+              className="underline font-medium"
             >
-              {loading ? 'Testing...' : 'Test'}
-            </button>
-          </div>
-
-          <p className="text-xs text-gray-400 mt-2">
-            The numbers in parentheses are that model's free-tier limits: how many requests you
-            can send per day, and per minute, before the provider starts rejecting calls until the
-            next window. Both reset automatically (daily count at midnight, per-minute count every
-            60s) and are set by each provider, not by this app — treat them as approximate, since
-            providers change them without notice.
+              My API keys
+            </button>{' '}
+            above to add one before testing.
           </p>
-
-          {missingKey && (
-            <p className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-3">
-              ⚠ You're missing an API key for {PROVIDER_KEY_INFO[provider].name}. Click{' '}
-              <button
-                type="button"
-                onClick={() => setKeyModalOpen(true)}
-                className="underline font-medium"
-              >
-                My API keys
-              </button>{' '}
-              above to add one before testing.
-            </p>
-          )}
-        </div>
-
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 min-h-[160px]">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm font-medium text-gray-700">Response</span>
-            {result && (
-              <span className="flex items-center gap-2 text-xs text-gray-400">
-                <span>
-                  {result.provider} / {result.model} · {result.valid ? 'valid JSON' : 'invalid JSON'}
-                </span>
-                <span className="font-semibold text-indigo-700 bg-indigo-100 rounded-full px-2 py-0.5">
-                  ⏱ {result.elapsedMs < 1000
-                    ? `${result.elapsedMs}ms`
-                    : `${(result.elapsedMs / 1000).toFixed(1)}s`}
-                </span>
-              </span>
-            )}
-          </div>
-
-          {loading && (
-            <p className="text-sm text-gray-400 animate-pulse">Waiting for response...</p>
-          )}
-
-          {!loading && error && (
-            <p className="text-sm text-red-500">{error}</p>
-          )}
-
-          {!loading && !error && !result && (
-            <p className="text-sm text-gray-400">Response will appear here.</p>
-          )}
-
-          {!loading && result && (
-            <pre className="whitespace-pre-wrap text-sm text-gray-800 font-sans overflow-x-auto">
-              {result.valid
-                ? JSON.stringify(result.parsed, null, 2)
-                : result.raw || '(empty response from model)'}
-            </pre>
-          )}
-        </div>
+        )}
       </div>
 
-      <KeyModal open={keyModalOpen} onClose={closeKeyModal} keys={keys} setKeys={setKeys} />
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 min-h-[160px]">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-sm font-medium text-gray-700">Response</span>
+          {result && (
+            <span className="flex items-center gap-2 text-xs text-gray-400">
+              <span>
+                {result.provider} / {result.model} · {result.valid ? 'valid JSON' : 'invalid JSON'}
+              </span>
+              <span className="font-semibold text-indigo-700 bg-indigo-100 rounded-full px-2 py-0.5">
+                ⏱ {result.elapsedMs < 1000
+                  ? `${result.elapsedMs}ms`
+                  : `${(result.elapsedMs / 1000).toFixed(1)}s`}
+              </span>
+            </span>
+          )}
+        </div>
+
+        {loading && (
+          <p className="text-sm text-gray-400 animate-pulse">Waiting for response...</p>
+        )}
+
+        {!loading && error && (
+          <p className="text-sm text-red-500">{error}</p>
+        )}
+
+        {!loading && !error && !result && (
+          <p className="text-sm text-gray-400">Response will appear here.</p>
+        )}
+
+        {!loading && result && <ResultView result={result} />}
+      </div>
+    </div>
+  )
+}
+
+const TABS = [
+  { id: 'test', label: 'Test' },
+  { id: 'history', label: 'History' },
+  { id: 'compare', label: 'Compare' },
+]
+
+function App() {
+  const [tab, setTab] = useState('test')
+  const [keyModalOpen, setKeyModalOpen] = useState(false)
+  const [keys, setKeys] = useState({})
+  const [savedNotice, setSavedNotice] = useState('')
+  const [systemPrompt, setSystemPrompt] = useState('')
+  const [defaultSystemPrompt, setDefaultSystemPrompt] = useState('')
+
+  useEffect(() => {
+    const stored = localStorage.getItem('llm-playground-keys')
+    if (stored) setKeys(JSON.parse(stored))
+
+    fetch('/api/system-prompt')
+      .then((res) => res.json())
+      .then((data) => {
+        setDefaultSystemPrompt(data.systemPrompt)
+        setSystemPrompt(data.systemPrompt)
+      })
+      .catch((err) => console.error('[llm-playground] Failed to load default system prompt:', err.message))
+  }, [])
+
+  const closeKeyModal = () => {
+    localStorage.setItem('llm-playground-keys', JSON.stringify(keys))
+    setKeyModalOpen(false)
+    setSavedNotice('Keys saved')
+    console.log('[llm-playground] API keys saved to local storage:', Object.keys(keys).filter((p) => keys[p]))
+    setTimeout(() => setSavedNotice(''), 2000)
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 text-gray-900 flex flex-col items-center py-10 px-4">
+      <div className="w-full max-w-4xl flex items-start justify-between mb-1">
+        <h1 className="text-3xl font-bold">Free LLM Playground</h1>
+        <button
+          type="button"
+          onClick={() => setKeyModalOpen(true)}
+          className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 hover:bg-gray-100"
+        >
+          🔑 My API keys
+        </button>
+      </div>
+      <p className="w-full max-w-4xl text-gray-500 mb-4">
+        Test a prompt against free-tier models, using your own key
+      </p>
+
+      <div className="w-full max-w-4xl flex gap-2 mb-6">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setTab(t.id)}
+            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+              tab === t.id ? 'bg-indigo-600 text-white' : 'bg-white border border-gray-300 text-gray-600 hover:bg-gray-100'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="w-full flex justify-center">
+        {tab === 'test' && (
+          <TestView
+            keys={keys}
+            setKeyModalOpen={setKeyModalOpen}
+            systemPrompt={systemPrompt}
+            defaultSystemPrompt={defaultSystemPrompt}
+            setSystemPrompt={setSystemPrompt}
+          />
+        )}
+        {tab === 'history' && <HistoryView />}
+        {tab === 'compare' && (
+          <CompareView
+            keys={keys}
+            setKeyModalOpen={setKeyModalOpen}
+            systemPrompt={systemPrompt}
+            defaultSystemPrompt={defaultSystemPrompt}
+            setSystemPrompt={setSystemPrompt}
+          />
+        )}
+      </div>
+
+      <KeyModal open={keyModalOpen} onClose={closeKeyModal} keys={keys} setKeys={setKeys} savedNotice={savedNotice} />
     </div>
   )
 }
