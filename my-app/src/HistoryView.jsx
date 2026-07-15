@@ -128,7 +128,7 @@ function CompareHistoryView({ entries, onBack }) {
                 ⏱ {e.elapsedMs < 1000 ? `${e.elapsedMs}ms` : `${(e.elapsedMs / 1000).toFixed(1)}s`}
               </span>
             </div>
-            <p className="text-xs text-gray-400 truncate mb-3">{e.prompt}</p>
+            <p className="text-xs text-gray-400 whitespace-pre-wrap break-words mb-3" title={e.prompt}>{e.prompt}</p>
             <ResultFallback entry={e} />
           </div>
         ))}
@@ -342,7 +342,7 @@ export default function HistoryView() {
                         {new Date(e.createdAt).toLocaleString()}
                       </span>
                     </div>
-                    <p className="text-xs text-gray-500 truncate mt-0.5">{e.prompt}</p>
+                    <p className="text-xs text-gray-500 whitespace-pre-wrap break-words mt-0.5" title={e.prompt}>{e.prompt}</p>
                     <div className="flex items-center gap-2 mt-1">
                       <span className="text-xs text-gray-400">{e.provider}</span>
                       <span className={`text-xs ${e.valid ? 'text-green-600' : 'text-red-500'}`}>
