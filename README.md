@@ -1,10 +1,10 @@
 # Free LLM Playground
 
-A playground for sending the same prompt to multiple free-tier LLMs — Google Gemini, Groq, and OpenRouter — side by side, and comparing how they respond.
+A playground for sending the same prompt to multiple free-tier LLMs — Google Gemini, Groq, and OpenRouter, side by side, and comparing how they respond.
 
 ## Why this exists
 
-Different LLMs answer the same prompt differently: in accuracy, style, verbosity, and speed. This project was built to make that comparison easy and repeatable — fire one prompt at several free-tier models at once, keep a history of past runs, and see stats (latency, success rate) per model over time, all without needing a paid API key for any provider.
+Different LLMs answer the same prompt differently: in accuracy, style, verbosity, and speed. This project was built to make that comparison easy and repeatable, fire one prompt at several free-tier models at once, keep a history of past runs, and see stats (latency, success rate) per model over time, all without needing a paid API key for any provider.
 
 ## Folder structure
 
